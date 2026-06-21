@@ -1,0 +1,66 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g., v1.0.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build all platforms
+        env:
+          CGO_ENABLED: 0
+        run: |
+          mkdir -p dist
+
+          LDFLAGS="-s -w"
+
+          GOOS=windows GOARCH=amd64 go build -ldflags "$LDFLAGS" -o dist/favycon-windows-amd64.exe .
+          GOOS=windows GOARCH=arm64 go build -ldflags "$LDFLAGS" -o dist/favycon-windows-arm64.exe .
+          GOOS=darwin  GOARCH=amd64 go build -ldflags "$LDFLAGS" -o dist/favycon-darwin-amd64 .
+          GOOS=darwin  GOARCH=arm64 go build -ldflags "$LDFLAGS" -o dist/favycon-darwin-arm64 .
+          GOOS=linux   GOARCH=amd64 go build -ldflags "$LDFLAGS" -o dist/favycon-linux-amd64 .
+          GOOS=linux   GOARCH=arm64 go build -ldflags "$LDFLAGS" -o dist/favycon-linux-arm64 .
+
+      - name: Generate SHA256 checksums
+        run: |
+          cd dist
+          sha256sum * > checksums-sha256.txt
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          gh release create "$TAG" dist/* \
+            --title "$TAG" \
+            --generate-notes
